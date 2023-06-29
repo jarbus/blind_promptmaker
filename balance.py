@@ -14,12 +14,13 @@ class LoadBalancer:
                 if lock.locked():
                     continue
                 async with lock:
-                    print("Acquired lock for", server)
                     if t == "SD":
+                        print(f"{server} recevied prompt")
                         async with aiohttp.ClientSession() as session:
                             async with session.get(server, params=data) as response:
                                 return await response.read()
                     elif t == "LLAMA":
+                        print(f"{server} recevied prompt")
                         async with aiohttp.ClientSession() as session:
                             async with session.post(server, json=data) as response:
                                 return await response.text()

@@ -6,9 +6,19 @@ from collections import defaultdict
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
+from dataclasses import dataclass, asdict
 
-llama_urls = ["http://localhost:8001/", "http://localhost:8002", "http://localhost:8003", "http://localhost:8004"]
-sd_urls = ["http://localhost:8010/"]
+@dataclass
+class Individual:
+    prompt: str
+    image: str
+    pid: int
+    ppid: int
+    mutations: tuple = ()
+
+
+llama_urls = ["http://localhost:8001/generate"]
+sd_urls = [f"http://localhost:800{i}/" for i in range(2,6)]
 
 llambalancer = LoadBalancer(llama_urls)
 sdbalancer = LoadBalancer(sd_urls)
@@ -20,7 +30,7 @@ class PromptIdent(BaseModel):
 class Ident(BaseModel):
     id: int
 
-with open("/home/garbus/genetic_prompting/genetic_prompter/prompts.txt", "r") as f:
+with open("/home/garbus/interactivediffusion/blind_promptmaker/prompts.txt", "r") as f:
     sd_prompt_list = f.readlines()
 
 def apply_random_crossover(prompt):
@@ -54,46 +64,55 @@ child_idx = defaultdict(int)
 
 async def send_to_llama(prompt):
     full_prompt = apply_random_crossover(prompt)
-    data = {"prompt": full_prompt}
+    data = {"prompt": full_prompt,
+        "use_beam_search": False,
+        "n": 1,
+        "max_tokens": 64,
+        "temperature": 0.8,
+    }
     return await llambalancer.distribute_request(data, "LLAMA")
 
 async def send_to_sd(prompt):
     return await sdbalancer.distribute_request({"prompt": prompt}, "SD")
 
 
-async def add_member(id: int, gen: int, prompt: str):
+async def add_member(ident: int, gen: int, prompt: str):
     global popgen
     new_prompt = await send_to_llama(prompt)
+    new_prompt = new_prompt.strip('"')
     new_image = await send_to_sd(new_prompt)
-    new_member = {"prompt": new_prompt.strip('"'), "image": new_image}
+    pid = hash(new_prompt)
+    ppid = hash(prompt.strip('"'))
+    new_member = Individual(new_prompt, new_image, pid, ppid, ["crossover"])
     
     async with poplock:
-        popgen[id][gen].append(new_member)
+        popgen[ident][gen].append(new_member)
 
 @app.post("/genesis")
 async def genesis(p: PromptIdent):
     global popgen, child_idx
     child_idx[p.id] = 0
-    popgen[p.id][0].append(p.prompt)
+    genesis_ind = Individual(p.prompt, "", hash(p.prompt.strip('"')),0, ["genesis"])
+    popgen[p.id] = [[],[]]
+    popgen[p.id][0].append(genesis_ind)
+
     popgen[p.id].append([])
     tasks = []
     for _ in range(16):
         tasks.append(add_member(p.id, 1, p.prompt))
-    print("submitted all tasks")
+    print(p.id, "submitted all tasks")
     await asyncio.gather(*tasks)
-    print(child_idx[p.id])
     return {"message": "Genesis Prompt submitted successfully"}
 
 
 @app.post("/submit_prompt")
 async def submit_prompt(p: PromptIdent):
     global popgen
-    popgen[p.id][-2].append(p.prompt) # add as parent
+    append_gen = len(popgen[p.id]) - 1
+    tasks = []
     for _ in range(4):
-        r = await send_to_llama(p.prompt)
-
-        popgen[p.id][-1].append(r) # create 4 children
-
+        tasks.append(add_member(p.id, append_gen, p.prompt)) # this is async
+    await asyncio.gather(*tasks)
     return {"message": "Prompt submitted successfully"}
 
 @app.post("/increment_generation")
@@ -109,12 +128,16 @@ async def increment_generation(ident: Ident):
 
 @app.get("/get_new_children")
 async def get_new_children(ident: int):
-    global popgen, child_idx
-    print(child_idx[ident], [len(pg) for pg in popgen[ident]])
 
-    if len(popgen[ident][-2]) <= child_idx[ident]:
-        raise HTTPException(status_code=204, detail="No new children available")
+    async with poplock:
+        global popgen, child_idx
+        print(ident, child_idx[ident], [len(pg) for pg in popgen[ident]])
 
-    new_children = popgen[ident][-2]#[child_idx:]
-    child_idx[ident] = len(new_children)
+        if len(popgen[ident][-2]) <= child_idx[ident]:
+            raise HTTPException(status_code=204, detail="No new children available")
+
+        new_children = popgen[ident][-2][child_idx[ident]:]
+        # convert from dataclass to dictionary
+        new_children = [asdict(child) for child in new_children]
+        child_idx[ident] = len(popgen[ident][-2])
     return {"children": new_children}
