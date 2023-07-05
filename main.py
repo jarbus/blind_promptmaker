@@ -24,6 +24,10 @@ llambalancer = LoadBalancer(llama_urls)
 sdbalancer = LoadBalancer(sd_urls)
 
 
+class CrossoverPromptIdent(BaseModel):
+    p1: str
+    p2: str
+    id: int
 class PromptIdent(BaseModel):
     prompt: str
     id: int
@@ -32,11 +36,6 @@ class Ident(BaseModel):
 
 with open("/home/garbus/interactivediffusion/blind_promptmaker/prompts.txt", "r") as f:
     sd_prompt_list = f.readlines()
-
-def apply_random_crossover(prompt):
-    return f"""Human: Caption 1: {prompt}
-Caption 2: {choice(sd_prompt_list).strip()}
-Assistant:"""
 
 origins = [
     "http://localhost",
@@ -73,6 +72,11 @@ child_idx = defaultdict(int)
 #    }
 #    return await llambalancer.distribute_request(data, "LLAMA")
 
+def apply_random_crossover(prompt1, prompt2):
+    return f"""Human: Caption 1: {prompt1}
+Caption 2: {prompt2}
+Assistant:"""
+
 def extract_descriptor():
     return f"""Human: Caption {choice(sd_prompt_list).strip()}
     Assistant:"""
@@ -81,24 +85,42 @@ def apply_descriptor(prompt, descriptor):
     Descriptor: {descriptor.strip()}
     Assistant:"""
 
-
-async def send_to_llama(prompt):
-    extract_prompt = extract_descriptor()
-    data = {"prompt": extract_prompt}
-    descriptor = await llambalancer.distribute_request(data, "LLAMA", "extract")
-    combine_prompt = apply_descriptor(prompt, descriptor)
-    data = {"prompt": combine_prompt}
-    result = await llambalancer.distribute_request(data, "LLAMA", "combine")
+async def make_new_prompt(prompt, prompt2=None):
+    """Mutates if prompt2 not provided, else crosses over"""
+    if prompt2 == None:
+        extract_prompt = extract_descriptor()
+        data = {"prompt": extract_prompt}
+        descriptor = await llambalancer.distribute_request(data, "LLAMA", "extract")
+        combine_prompt = apply_descriptor(prompt, descriptor)
+        data = {"prompt": combine_prompt}
+        result = await llambalancer.distribute_request(data, "LLAMA", "combine")
+        return result
+    data = {"prompt": apply_random_crossover(prompt, prompt2)}
+    result = await llambalancer.distribute_request(data, "LLAMA", "crossover")
     return result
+
 
 async def send_to_sd(prompt):
     return await sdbalancer.distribute_request({"prompt": prompt}, "SD", "")
 
 
-async def add_member(ident: int, gen: int, prompt: str):
+async def add_member(ident: int, gen: int, prompt: str, prompt2:str=None):
     global popgen
-    new_prompt = await send_to_llama(prompt)
-    new_prompt = new_prompt.strip('"')
+    # try 3 times to generate a unique prompt
+    # otherwise, just include the duplicate
+    prompt = prompt.strip('"').strip()
+    if prompt2:
+        prompt2 = prompt2.strip('"').strip()
+    new_prompt = None
+    for i in range(1):
+        new_prompt = await make_new_prompt(prompt, prompt2)
+        new_prompt = new_prompt.strip('"').strip()
+        if new_prompt != prompt:
+            break
+        if i < 1:
+            print("============Generated the same prompt")
+        else:
+            print("============GIVING UP, KEEPING DUPE=======")
     new_image = await send_to_sd(new_prompt)
     pid = hash(new_prompt)
     ppid = hash(prompt.strip('"'))
@@ -123,6 +145,15 @@ async def genesis(p: PromptIdent):
     await asyncio.gather(*tasks)
     return {"message": "Genesis Prompt submitted successfully"}
 
+@app.post("/crossover_prompts")
+async def crossover_prompts(p: CrossoverPromptIdent):
+    global popgen
+    append_gen = len(popgen[p.id]) - 1
+    tasks = []
+    for _ in range(4):
+        tasks.append(add_member(p.id, append_gen, p.p1, p.p2)) # this is async
+    await asyncio.gather(*tasks)
+    return {"message": "Prompt submitted successfully"} 
 
 @app.post("/submit_prompt")
 async def submit_prompt(p: PromptIdent):
@@ -137,7 +168,7 @@ async def submit_prompt(p: PromptIdent):
 @app.post("/increment_generation")
 async def increment_generation(ident: Ident):
     global popgen, child_idx
-    # not enought parents
+    # not enough parents
     if len(popgen[ident.id][0]) == 0 or (len(popgen[ident.id]) > 2 and len(popgen[ident.id][-2]) < n_parents):
         raise HTTPException(status_code=400, detail="No prompts available")
     popgen[ident.id].append([])
