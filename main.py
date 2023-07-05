@@ -17,7 +17,7 @@ class Individual:
     mutations: tuple = ()
 
 
-llama_urls = ["http://localhost:8001/generate"]
+llama_urls = ["http://localhost:8001/", "http://localhost:8010/"]
 sd_urls = [f"http://localhost:800{i}/" for i in range(2,6)]
 
 llambalancer = LoadBalancer(llama_urls)
@@ -58,22 +58,41 @@ app.add_middleware(
 # Global list to store each generation
 # first element is the parent, second is the child
 popgen = defaultdict(lambda: [[],[]])
+in_progress = defaultdict(set)
 poplock = asyncio.Lock()
 # keeps track of which child we've already returned
 child_idx = defaultdict(int)
 
+#async def send_to_llama(prompt):
+#    full_prompt = apply_random_crossover(prompt)
+#    data = {"prompt": full_prompt,
+#        "use_beam_search": False,
+#        "n": 1,
+#        "max_tokens": 64,
+#        "temperature": 0.8,
+#    }
+#    return await llambalancer.distribute_request(data, "LLAMA")
+
+def extract_descriptor():
+    return f"""Human: Caption {choice(sd_prompt_list).strip()}
+    Assistant:"""
+def apply_descriptor(prompt, descriptor):
+    return f"""Human: Caption: {prompt}
+    Descriptor: {descriptor.strip()}
+    Assistant:"""
+
+
 async def send_to_llama(prompt):
-    full_prompt = apply_random_crossover(prompt)
-    data = {"prompt": full_prompt,
-        "use_beam_search": False,
-        "n": 1,
-        "max_tokens": 64,
-        "temperature": 0.8,
-    }
-    return await llambalancer.distribute_request(data, "LLAMA")
+    extract_prompt = extract_descriptor()
+    data = {"prompt": extract_prompt}
+    descriptor = await llambalancer.distribute_request(data, "LLAMA", "extract")
+    combine_prompt = apply_descriptor(prompt, descriptor)
+    data = {"prompt": combine_prompt}
+    result = await llambalancer.distribute_request(data, "LLAMA", "combine")
+    return result
 
 async def send_to_sd(prompt):
-    return await sdbalancer.distribute_request({"prompt": prompt}, "SD")
+    return await sdbalancer.distribute_request({"prompt": prompt}, "SD", "")
 
 
 async def add_member(ident: int, gen: int, prompt: str):
