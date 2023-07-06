@@ -76,6 +76,14 @@ def apply_random_crossover(prompt1, prompt2):
     return f"""Human: Caption 1: {prompt1}
 Caption 2: {prompt2}
 Assistant:"""
+def extract_subject(prompt):
+    return f"""Human: Caption: {prompt}
+Assistant:"""
+
+def reinsert_subject(prompt, subject):
+    return f"""Human: Caption: {prompt}
+Subjects: {subject}
+Assistant:"""
 
 def extract_descriptor():
     return f"""Human: Caption {choice(sd_prompt_list).strip()}
@@ -85,19 +93,31 @@ def apply_descriptor(prompt, descriptor):
     Descriptor: {descriptor.strip()}
     Assistant:"""
 
+async def mutate(prompt):
+    extract_prompt = extract_descriptor()
+    data = {"prompt": extract_prompt}
+    descriptor = await llambalancer.distribute_request(data, "LLAMA", "extract")
+    combine_prompt = apply_descriptor(prompt, descriptor)
+    data = {"prompt": combine_prompt}
+    result = await llambalancer.distribute_request(data, "LLAMA", "combine")
+    return result
+
+async def crossover(p1, p2):
+    data = {"prompt": apply_random_crossover(p1, p2)}
+    crossover_prompt = await llambalancer.distribute_request(data, "LLAMA", "crossover")
+    data = {"prompt": extract_subject(p1)}
+    subject = await llambalancer.distribute_request(data, "LLAMA", "subject-extract") 
+    data = {"prompt": reinsert_subject(crossover_prompt, subject)}
+    child = await llambalancer.distribute_request(data, "LLAMA", "subject-reinsert") 
+    return child
+
 async def make_new_prompt(prompt, prompt2=None):
     """Mutates if prompt2 not provided, else crosses over"""
     if prompt2 == None:
-        extract_prompt = extract_descriptor()
-        data = {"prompt": extract_prompt}
-        descriptor = await llambalancer.distribute_request(data, "LLAMA", "extract")
-        combine_prompt = apply_descriptor(prompt, descriptor)
-        data = {"prompt": combine_prompt}
-        result = await llambalancer.distribute_request(data, "LLAMA", "combine")
-        return result
-    data = {"prompt": apply_random_crossover(prompt, prompt2)}
-    result = await llambalancer.distribute_request(data, "LLAMA", "crossover")
-    return result
+        return await mutate(prompt)
+    crossed_over_prompt = await crossover(prompt, prompt2)
+    mutate_crossover = await mutate(crossed_over_prompt)
+    return mutate_crossover
 
 
 async def send_to_sd(prompt):
