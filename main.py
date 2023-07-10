@@ -9,6 +9,14 @@ from pydantic import BaseModel
 from dataclasses import dataclass, asdict
 
 
+@dataclass 
+class MutationInfo:
+    mutation_type: str = None
+    extracted: str = None
+    extracted_prompt: str = None
+    crossover_prompt: str = None
+    crossover_image = None
+    genesis: bool = False
 
 @dataclass
 class Individual:
@@ -17,7 +25,7 @@ class Individual:
     pid: int
     ppid: int
     ppid2: int
-    mutations: tuple = ()
+    minfo: MutationInfo
 
 # Global list to store each generation
 # first element is the parent, second is the child
@@ -32,28 +40,23 @@ class Generations:
         self.g[ident][0].append(genesis_ind)
 
     async def add_member(self, ident: int, gen: int, prompt: str, prompt2:str=None):
-        # try 3 times to generate a unique prompt
-        # otherwise, just include the duplicate
+        """Generates and adds a new member to self.g"""
+        # get rid of all quotes and trailing white space
         prompt = prompt.strip('"').strip()
         if prompt2:
             prompt2 = prompt2.strip('"').strip()
-        new_prompt = None
-        for i in range(1):
-            new_prompt = await make_new_prompt(prompt, prompt2)
-            new_prompt = new_prompt.strip('"').strip()
-            if new_prompt != prompt:
-                break
-            if i < 1:
-                print("============Generated the same prompt")
-            else:
-                print("============GIVING UP, KEEPING DUPE=======")
+        # generate a new prompt and all mutation info
+        new_prompt, minfo = await make_new_prompt(prompt, prompt2)
         new_image = await send_to_sd(new_prompt)
         pid = hash(new_prompt)
-        ppid = hash(prompt.strip('"'))
-        ppid2 = hash(prompt2.strip('"')) if prompt2 else None
+        ppid = hash(prompt.strip('"').strip())
+        ppid2 = hash(prompt2.strip('"').strip()) if prompt2 else None
             
-        new_member = Individual(new_prompt, new_image, pid, ppid, ppid2, ["crossover"])
+        new_member = Individual(new_prompt, new_image, pid, ppid, ppid2, minfo)
         
+        if gen > 1:
+            ppids = [ind.pid for ind in self.g[ident][gen-1]]
+            assert ppid in ppids
         async with self.lock:
             self.g[ident][gen].append(new_member)
  
@@ -98,21 +101,25 @@ Subjects: {subject}
 Assistant:"""
 
 def extract_descriptor():
-    return f"""Human: Caption {choice(sd_prompt_list).strip()}
-    Assistant:"""
+    # returns the caption with and without the
+    # Human: Assistant: phrases
+    p = choice(sd_prompt_list).strip()
+    return f"""Human: Caption {p}
+    Assistant:""", p
 def apply_descriptor(prompt, descriptor):
     return f"""Human: Caption: {prompt}
     Descriptor: {descriptor.strip()}
     Assistant:"""
 
 async def mutate(prompt):
-    extract_prompt = extract_descriptor()
-    data = {"prompt": extract_prompt}
+    extract_prompt_with_speakers, extract_prompt = extract_descriptor()
+    data = {"prompt": extract_prompt_with_speakers}
     descriptor = await llambalancer.distribute_request(data, "LLAMA", "extract")
     combine_prompt = apply_descriptor(prompt, descriptor)
     data = {"prompt": combine_prompt}
     result = await llambalancer.distribute_request(data, "LLAMA", "combine")
-    return result
+    minfo = MutationInfo(mutation_type="extract",extracted=descriptor, extracted_prompt=extract_prompt)
+    return result, minfo
 
 async def crossover(p1, p2):
     data = {"prompt": apply_random_crossover(p1, p2)}
@@ -125,11 +132,14 @@ async def crossover(p1, p2):
 
 async def make_new_prompt(prompt, prompt2=None):
     """Mutates if prompt2 not provided, else crosses over"""
-    if prompt2 == None:
-        return await mutate(prompt)
-    crossed_over_prompt = await crossover(prompt, prompt2)
-    mutate_crossover = await mutate(crossed_over_prompt)
-    return mutate_crossover
+    if prompt2 != None:
+        new_prompt = await crossover(prompt, prompt2)
+    else:
+        new_prompt = prompt
+    new_prompt, minfo = await mutate(new_prompt)
+    new_prompt = new_prompt.strip('"').strip()
+    minfo.crossover_prompt = prompt2
+    return new_prompt, minfo
 
 
 async def send_to_sd(prompt):
@@ -154,8 +164,8 @@ app.add_middleware(
 async def genesis(p: PromptIdent):
     global gens, child_idx
     child_idx[p.id] = 0
-    genesis_ind = Individual(p.prompt, "", hash(p.prompt.strip('"')),0, 0, ["genesis"])
-    gens.set_genesis(p.id, genesis_ind)
+    genesis_ind = Individual(p.prompt, "", hash(p.prompt.strip('"')),0, 0, MutationInfo(genesis=True))
+    await gens.set_genesis(p.id, genesis_ind)
 
     tasks = []
     for _ in range(16):
