@@ -210,3 +210,9 @@ async def get_new_children(ident: int):
         new_children = [asdict(child) for child in new_children]
         child_idx[ident] = len(gens[ident][-2])
     return {"children": new_children}
+@app.get("/download")
+async def download(ident: int):
+    """Downloads the entire family tree as json"""
+    global gens
+    data = {'generations' : [[asdict(ind) for ind in gen]for gen in gens[ident]]}
+    return data
