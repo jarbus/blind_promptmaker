@@ -5,7 +5,7 @@ from .indmanager import IndManager, Individual, make_individual
 from .mutator import Mutator
 from .utils import clean
 from collections import defaultdict
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, Query
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 from dataclasses import dataclass, asdict
@@ -38,8 +38,6 @@ class PromptGenesisID(BaseModel):
     prompt: str
     prompt2: str = None
     gen: int
-    genesis_id: int
-class GenesisID(BaseModel):
     genesis_id: int
 
 
@@ -79,35 +77,20 @@ async def submit_prompt(p: PromptGenesisID):
     return {"message": "Prompt submitted successfully"}
 
 @app.get("/get_new_children")
-async def get_new_children(genesis_id: int, gen: int, seen_pids: list[int]=[]):
+async def get_new_children(genesis_id: int, gen: int, seen_pids: list = Query(None)):
+    # no seen pids represented as ''
+    if seen_pids:
+        seen_pids = [int(pid) for pid in seen_pids[0].split(',') if pid]
     new_children = im.get_individuals_by_gen(genesis_id, gen, seen_pids)
     if len(new_children) == 0:
         raise HTTPException(status_code=204, detail="No new children available")
 
     # convert from dataclass to dictionary
     new_children = [child.to_dict() for child in new_children]
+    for child in new_children:
+        assert not child["pid"] in seen_pids
+
     return new_children
-
-#@app.post("/crossover_prompts")
-#async def crossover_prompts(p: CrossoverPromptGenesisID):
-#    global gens
-#    append_gen = len(gens[p.id]) - 1
-#    tasks = []
-#    for _ in range(4):
-#        tasks.append(gens.add_member(p.id, append_gen, p.p1, p.p2)) # this is async
-#    await asyncio.gather(*tasks)
-#    return {"message": "Prompt submitted successfully"} 
-
-#@app.post("/increment_generation")
-#async def increment_generation(ident: GenesisID):
-#    global gens, child_idx
-#    # not enough parents
-#    if len(gens[ident.id][0]) == 0 or (len(gens[ident.id]) > 2 and len(gens[ident.id][-2]) < n_parents):
-#        raise HTTPException(status_code=400, detail="No prompts available")
-#    gens[ident.id].append([])
-#    child_idx[ident.id] = 0
-#    return {"message": "Generation incremented successfully"}
-
 
 
 #@app.get("/download")
