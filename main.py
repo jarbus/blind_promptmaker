@@ -17,7 +17,7 @@ n_prompts = 16
 n_parents = 4
 im = IndManager("sqlite:///your_db_uri.db")
 llama_urls = ["http://localhost:8001/", "http://localhost:8010/"]
-sd_urls = [f"http://localhost:800{i}/" for i in range(2,6)]
+sd_urls = [f"http://localhost:800{i}/" for i in range(2,10)]
 
 mutator = Mutator(llama_urls, sd_urls)
 
@@ -64,7 +64,7 @@ async def genesis(p: PromptGenesisID):
     im.add_individual(genesis_ind)
 
     tasks = []
-    for _ in range(1):
+    for _ in range(16):
         tasks.append(add_member(p.genesis_id, 1, p.prompt))
     print(p.genesis_id, "submitted all tasks")
     await asyncio.gather(*tasks)
