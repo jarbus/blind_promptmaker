@@ -5,8 +5,10 @@ from .indmanager import IndManager, Individual, make_individual
 from .mutator import Mutator
 from .utils import clean
 from collections import defaultdict
-from fastapi import FastAPI, HTTPException, Query
+from fastapi import FastAPI, HTTPException, Query, Request
+from fastapi.responses import HTMLResponse
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.templating import Jinja2Templates
 from pydantic import BaseModel
 from dataclasses import dataclass, asdict
 
@@ -54,6 +56,7 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*", "Access-Control-Allow-Origin"],
 )
+templates = Jinja2Templates(directory="/home/garbus/interactivediffusion/blind_promptmaker/templates")
  
 @app.post("/genesis")
 async def genesis(p: PromptGenesisID):
@@ -92,6 +95,19 @@ async def get_new_children(genesis_id: int, gen: int, seen_pids: list = Query(No
 
     return new_children
 
+
+@app.get("/lineage", response_class=HTMLResponse)
+async def get_lineage(genesis_id: int, pid: int, r: Request):
+    lineage = im.get_lineage(genesis_id, pid)
+    lineage = [l.to_dict() for l in lineage]
+    # convert from bytes to string and get rid of quotes
+    for l in lineage[1:]:
+        l["image"] = l["image"].decode("utf-8")[1:-1]
+
+    return templates.TemplateResponse("lineage.html", {
+        "request": r,
+        "image_list": lineage[1:], 
+        "genesis_prompt": lineage[0]["prompt"]})
 
 #@app.get("/download")
 #async def download(ident: int):
