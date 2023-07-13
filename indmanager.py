@@ -61,18 +61,19 @@ class IndManager:
 
     def get_individuals_by_pid(self, genesis_id, pid):
         with self.Session() as session:
-            inds = session.query(Individual).filter(Individual.genesis_id == genesis_id, Individual.pid == pid).all()
+            inds = session.query(Individual).filter(Individual.genesis_id == genesis_id, Individual.pid == str(pid)).all()
             assert len(inds) < 3 # no more than three dupes
-            return inds[0]
+            return inds
 
     def get_individuals_by_gen(self, genesis_id, gen, seen_pids):
         with self.Session() as session:
             return session.query(Individual).filter(Individual.genesis_id == genesis_id, Individual.gen == gen, Individual.pid.notin_(seen_pids)).all()
 
-    def compute_lineage(self, genesis_id, pid):
+    def get_lineage(self, genesis_id, pid):
         lineage = []
-        individual = self.get_individual_by_pid(genesis_id, pid)
-        while individual is not None:
-            lineage.append(individual)
-            individual = self.get_individual_by_pid(genesis_id, individual.ppid)
-        return lineage
+        individual = self.get_individuals_by_pid(genesis_id, pid)
+
+        while individual:
+            lineage.append(individual[0])
+            individual = self.get_individuals_by_pid(genesis_id, individual[0].ppid)
+        return reversed(lineage)
