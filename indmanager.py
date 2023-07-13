@@ -76,4 +76,4 @@ class IndManager:
         while individual:
             lineage.append(individual[0])
             individual = self.get_individuals_by_pid(genesis_id, individual[0].ppid)
-        return reversed(lineage)
+        return list(reversed(lineage))
