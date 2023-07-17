@@ -20,20 +20,28 @@ llama_urls = ["http://localhost:8001/", "http://localhost:8010/"]
 sd_urls = [f"http://localhost:800{i}/" for i in range(2,10)]
 
 mutator = Mutator(llama_urls, sd_urls)
+in_progress = defaultdict(list)
+prog_lock = asyncio.Lock()
+
 
 async def add_member(genesis_id: int, gen: int, prompt: str, prompt2:str=None):
     """Generates and adds a new member to self.g"""
     # get rid of all quotes and trailing white space
     prompt = clean(prompt)
     prompt2 = clean(prompt2) if prompt2 else None
+    ppid = hash(clean(prompt))
+    ppid2 = hash(clean(prompt2)) if prompt2 else None
+    async with prog_lock:
+        in_progress[genesis_id].append(ppid)
     # generate a new prompt and all mutation info
     new_prompt, minfo = await mutator.make_new_prompt(prompt, prompt2)
     new_image = await mutator.send_to_sd(new_prompt)
     pid = hash(new_prompt)
-    ppid = hash(clean(prompt))
-    ppid2 = hash(clean(prompt2)) if prompt2 else None
     new_member = make_individual(genesis_id, new_prompt, ppid, ppid2, new_image,  gen, {"genesis": True})
-    im.add_individual(new_member)
+    async with prog_lock:
+        if ppid in in_progress[genesis_id]:
+            im.add_individual(new_member)
+            in_progress[genesis_id].remove(ppid)
  
 
 class PromptGenesisID(BaseModel):
@@ -123,6 +131,10 @@ async def get_lineage(genesis_id: int, pid: int, r: Request):
         "crossover_list": crossovers,
         "genesis_prompt": lineage[0]["prompt"]})
 
+@app.get("/working")
+async def working(genesis_id: int):
+    async with prog_lock:
+        return len(in_progress[genesis_id])
 #@app.get("/download")
 #async def download(ident: int):
 #    """Downloads the entire family tree as json"""
