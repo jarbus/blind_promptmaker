@@ -3,7 +3,7 @@ import json
 from typing import Union
 from .utils import clean
 from random import randint
-from sqlalchemy import Column, Integer, String, create_engine
+from sqlalchemy import Column, Integer, String, create_engine, event
 from sqlalchemy.orm import sessionmaker
 from sqlalchemy.ext.declarative import declarative_base
 
@@ -51,6 +51,17 @@ class IndManager:
     # TODO: figure out if it's ok to make multiple sessions like this
     def __init__(self, db_uri):
         self.engine = create_engine(db_uri)
+        @event.listens_for(self.engine, "connect")
+        def set_sqlite_pragma(dbapi_connection, connection_record):
+            cursor = dbapi_connection.cursor()
+            cursor.execute("PRAGMA journal_mode=WAL;")
+            cursor.execute("pragma synchronous = normal;")
+            cursor.execute("pragma temp_store = memory;")
+            cursor.execute("pragma mmap_size = 30000000000;")
+            cursor.close()
+
+
+
         Base.metadata.create_all(self.engine)
         self.Session = sessionmaker(bind=self.engine)
 
