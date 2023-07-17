@@ -100,13 +100,27 @@ async def get_new_children(genesis_id: int, gen: int, seen_pids: list = Query(No
 async def get_lineage(genesis_id: int, pid: int, r: Request):
     lineage = im.get_lineage(genesis_id, pid)
     lineage = [l.to_dict() for l in lineage]
+    print([l["ppid"] for l in lineage])
     # convert from bytes to string and get rid of quotes
     for l in lineage[1:]:
         l["image"] = l["image"].decode("utf-8")[1:-1]
 
+    crossovers = []
+    for ind in lineage:
+        ppid2 = ind["ppid2"]
+        if ppid2 != "None":
+            parent2 = im.get_individuals_by_pid(genesis_id, ppid2)[0]
+            parent2 = parent2.to_dict()
+            parent2["image"] = parent2["image"].decode("utf-8")[1:-1]
+            crossovers.append(parent2)
+        else:
+            crossovers.append(None)
+
     return templates.TemplateResponse("lineage.html", {
         "request": r,
         "image_list": lineage[1:], 
+        "genesis_id": genesis_id,
+        "crossover_list": crossovers,
         "genesis_prompt": lineage[0]["prompt"]})
 
 #@app.get("/download")

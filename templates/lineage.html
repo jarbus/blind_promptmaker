@@ -1,0 +1,105 @@
+<!DOCTYPE html>
+<html>
+<head>
+<style>
+
+:root{
+    --image-height: 10em;
+    --arrow-width: 50px;
+}
+
+.table {
+    display: table;
+    width: var(--image-height);
+}
+.table-cell {
+    display: table-cell;
+    vertical-align: middle;
+    text-align: center;
+    height: var(--image-height);
+}
+
+.arrow {
+    display: inline-block;
+    margin-left: 0px;
+    margin-right: 0px;
+    background-color: rgba(0,0,0,0);
+    text-align: center;
+    font-size: var(--arrow-width);
+}
+.placeholder {
+    opacity: 0;
+}
+.image-container {
+    display: flex;
+}
+.image-container img {
+    height: var(--image-height);
+    width: var(--image-height);
+}
+</style>
+</head>
+<body>
+
+
+
+<!-- MAIN LINEAGE LINE -->
+<div class="image-container">
+<!-- Center genesis prompt in display -->
+<div class="table">
+  <div class="table-cell">
+  {{ genesis_prompt }}
+  </div>
+</div>
+{% for image_data in image_list %}
+    <div class="arrow right">&#8594</div>
+    <div>
+    <img src="data:image/jpeg;base64,{{ image_data.image }}" alt="Image {{ loop.index }}" >
+    <br>
+    <p style="text-align: center; width: var(--image-height);"> {{ image_data.prompt }} </p>
+    </div>
+{% endfor %}
+</div>
+
+
+<!-- Display up arrows -->
+<div class="image-container">
+{% for crossover_data in crossover_list %}
+<!-- Center arrow in display, make it wxh of image -->
+<div class="table">
+  <div class="table-cell">
+  <p class="arrow">&#8593</p>
+  </div>
+</div>
+<div style="width: var(--arrow-width);">
+<p class="placeholder arrow">&#8594</p>
+</div>
+{% endfor %}
+</div>
+
+<!-- ADDITIONAL INFORMATION LINE -->
+<div class="image-container">
+{% for crossover_data in crossover_list %}
+    <div style="width: var(--image-height);">
+    {% if crossover_data.image %}
+    <a href="localhost:8000/lineage?pid={{crossover_data.pid}}&genesis_id={{genesis_id}}">
+    <img src="data:image/jpeg;base64,{{ crossover_data.image }}" alt="Image {{ loop.index }}" >
+    </a>
+    <br>
+    <p style="text-align: center; width: var(--image-height);"> 
+    {{ crossover_data.prompt }} 
+    </p>
+    {% else %}
+     <div class="table">
+      <div class="table-cell">
+      </div>
+    </div> 
+    {% endif %}
+    </div>
+    <div style="width: var(--arrow-width);">
+    <p class="placeholder arrow">&#8594</p>
+    </div>
+{% endfor %}
+</div>
+</body>
+</html>
